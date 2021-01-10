@@ -1,12 +1,13 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"image"
 	_ "image/jpeg"
 	_ "image/png"
-	"log"
 	"os"
+	"strings"
 
 	zglob "github.com/mattn/go-zglob"
 	flag "github.com/spf13/pflag"
@@ -26,76 +27,49 @@ func init() {
 	flag.IntVar(&maxHeight, "max-height", 2560, "縦の最大サイズ")
 }
 
-type result struct {
-	Path   string
-	Reason []string
-}
+func lintImage(filePath string) error {
+	var st []string
 
-func main() {
-	var st []result
-	flag.Parse()
-
-	for _, x := range flag.Args() {
-		files, err := zglob.Glob(x)
-		if err != nil {
-			log.Fatal(err)
-		}
-		for _, file := range files {
-			if err := checkImage(file); err != nil {
-				st = append(st, result{Path: file, Reason: err})
-			}
-		}
-	}
-
-	if len(st) > 0 {
-		fmt.Fprintln(os.Stderr, "画像チェック中にエラーが発生しました。")
-		for _, x := range st {
-			fmt.Fprintf(os.Stderr, "%s\n", x.Path)
-			for _, v := range x.Reason {
-				fmt.Fprintf(os.Stderr, " %s\n", v)
-			}
-		}
-		os.Exit(1)
-	}
-
-	os.Exit(0)
-}
-
-func checkImage(file string) []string {
-	var f []string
-
-	w, h, err := getImageDimension(file)
+	file, err := os.Open(filePath)
+	defer file.Close()
 	if err != nil {
-		return nil
+		return err
+	}
+	x, _, err := image.DecodeConfig(file)
+	if err != nil {
+		return err
 	}
 
-	if w < minWidth {
-		f = append(f, fmt.Sprintf("横:小 最小：%d > 実際：%d", minWidth, w))
+	if x.Width < minWidth {
+		st = append(st, fmt.Sprintf("min-width: expected(%d<) actual(%d)", minWidth, x.Width))
 	}
-	if maxWidth < w {
-		f = append(f, fmt.Sprintf("横:大 最大：%d < 実際：%d", maxWidth, w))
+	if maxWidth < x.Width {
+		st = append(st, fmt.Sprintf("max-width: expected(<%d) actual(%d)", maxWidth, x.Width))
 	}
-	if h < minHeight {
-		f = append(f, fmt.Sprintf("縦:小 最小：%d > 実際：%d", minHeight, h))
+	if x.Height < minHeight {
+		st = append(st, fmt.Sprintf("min-height: expected(%d<) actual(%d)", minHeight, x.Height))
 	}
-	if maxHeight < h {
-		f = append(f, fmt.Sprintf("縦:大 最大：%d < 実際：%d", maxHeight, h))
+	if maxHeight < x.Height {
+		st = append(st, fmt.Sprintf("max-height: expected(<%d) actual(%d)", maxHeight, x.Height))
 	}
-	if len(f) > 0 {
-		return f
+	if len(st) > 0 {
+		return errors.New(strings.Join(st, ", "))
 	}
 	return nil
 }
 
-func getImageDimension(imagePath string) (int, int, error) {
-	file, err := os.Open(imagePath)
-	defer file.Close()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "%v\n", err)
+func main() {
+	flag.Parse()
+	retStatus := 0
+
+	for _, x := range flag.Args() {
+		files, _ := zglob.Glob(x)
+		for _, file := range files {
+			if err := lintImage(file); err != nil {
+				fmt.Printf("%s: %s\n", file, err)
+				retStatus = 1
+			}
+		}
 	}
-	x, _, err := image.DecodeConfig(file)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "%s: %v\n", imagePath, err)
-	}
-	return x.Width, x.Height, err
+	os.Exit(retStatus)
 }
