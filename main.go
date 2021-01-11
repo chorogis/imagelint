@@ -1,7 +1,6 @@
 package main
 
 import (
-	"errors"
 	"fmt"
 	"image"
 	_ "image/jpeg"
@@ -27,33 +26,56 @@ func init() {
 	flag.IntVar(&maxHeight, "max-height", 2560, "縦の最大サイズ")
 }
 
+type lintError struct {
+	FilePath string
+	Results  []string
+}
+
+func (e *lintError) Error() string {
+	return e.ConvertMDList()
+}
+
+func (e *lintError) ConvertMDList() string {
+	m := []string{e.FilePath, "\n"}
+	for _, x := range e.Results {
+		m = append(m, fmt.Sprintf("- %s\n", x))
+	}
+	return strings.Join(m, "")
+}
+
 func lintImage(filePath string) error {
-	var st []string
+	st := &lintError{FilePath: filePath}
 
 	file, err := os.Open(filePath)
 	defer file.Close()
 	if err != nil {
-		return err
+		st.Results = append(st.Results, err.Error())
+		return st
 	}
 	x, _, err := image.DecodeConfig(file)
 	if err != nil {
-		return err
+		st.Results = append(st.Results, err.Error())
+		return st
 	}
 
 	if x.Width < minWidth {
-		st = append(st, fmt.Sprintf("min-width: expected(%d<) actual(%d)", minWidth, x.Width))
+		st.Results = append(st.Results,
+			fmt.Sprintf("min-width: expected(%d<) actual(%d)", minWidth, x.Width))
 	}
 	if maxWidth < x.Width {
-		st = append(st, fmt.Sprintf("max-width: expected(<%d) actual(%d)", maxWidth, x.Width))
+		st.Results = append(st.Results,
+			fmt.Sprintf("max-width: expected(<%d) actual(%d)", maxWidth, x.Width))
 	}
 	if x.Height < minHeight {
-		st = append(st, fmt.Sprintf("min-height: expected(%d<) actual(%d)", minHeight, x.Height))
+		st.Results = append(st.Results,
+			fmt.Sprintf("min-height: expected(%d<) actual(%d)", minHeight, x.Height))
 	}
 	if maxHeight < x.Height {
-		st = append(st, fmt.Sprintf("max-height: expected(<%d) actual(%d)", maxHeight, x.Height))
+		st.Results = append(st.Results,
+			fmt.Sprintf("max-height: expected(<%d) actual(%d)", maxHeight, x.Height))
 	}
-	if len(st) > 0 {
-		return errors.New(strings.Join(st, ", "))
+	if len(st.Results) > 0 {
+		return st
 	}
 	return nil
 }
@@ -66,7 +88,7 @@ func main() {
 		files, _ := zglob.Glob(x)
 		for _, file := range files {
 			if err := lintImage(file); err != nil {
-				fmt.Printf("%s: %s\n", file, err)
+				fmt.Println(err)
 				retStatus = 1
 			}
 		}
